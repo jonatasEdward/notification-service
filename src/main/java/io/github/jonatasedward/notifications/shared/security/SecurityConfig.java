@@ -1,5 +1,6 @@
 package io.github.jonatasedward.notifications.shared.security;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -19,15 +20,24 @@ import java.util.List;
 @Configuration
 class SecurityConfig {
 
+    /**
+     * Metrics stay behind authentication unless {@code app.metrics-public=true}, which the load-test
+     * environment sets so the scraper and the report script can read them.
+     */
     @Bean
-    SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain securityFilterChain(HttpSecurity http,
+                                            @Value("${app.metrics-public:false}") boolean metricsPublic) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(cors -> {})
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(rules -> rules
-                        .requestMatchers("/error", "/actuator/health/**", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
-                        .anyRequest().authenticated())
+                .authorizeHttpRequests(rules -> {
+                    rules.requestMatchers("/error", "/actuator/health/**", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll();
+                    if (metricsPublic) {
+                        rules.requestMatchers("/actuator/prometheus").permitAll();
+                    }
+                    rules.anyRequest().authenticated();
+                })
                 .oauth2ResourceServer(server -> server.jwt(jwt -> {}));
         return http.build();
     }
