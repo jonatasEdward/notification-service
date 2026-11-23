@@ -18,6 +18,7 @@ public class TestcontainersConfig {
     @Bean
     @ServiceConnection
     KafkaContainer kafka() {
-        return new KafkaContainer("apache/kafka:3.9.0");
+        // Kafka 3.9+ refuses the 0.0.0.0 advertised listener this container sets up.
+        return new KafkaContainer("apache/kafka:3.8.1");
     }
 }
