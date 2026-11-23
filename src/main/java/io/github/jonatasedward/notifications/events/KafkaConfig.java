@@ -1,6 +1,7 @@
 package io.github.jonatasedward.notifications.events;
 
 import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.common.TopicPartition;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.TopicBuilder;
@@ -30,13 +31,18 @@ class KafkaConfig {
      * instead of blocking its partition for everyone else.
      */
     @Bean
-    CommonErrorHandler kafkaErrorHandler(KafkaOperations<?, ?> kafkaTemplate) {
+    CommonErrorHandler kafkaErrorHandler(KafkaOperations<?, ?> kafkaTemplate, TopicProperties topics) {
         ExponentialBackOffWithMaxRetries backOff = new ExponentialBackOffWithMaxRetries(3);
         backOff.setInitialInterval(500);
         backOff.setMultiplier(2.0);
         backOff.setMaxInterval(5_000);
 
-        DefaultErrorHandler handler = new DefaultErrorHandler(new DeadLetterPublishingRecoverer(kafkaTemplate), backOff);
+        // Explicit destination: the default suffix changed between Spring Kafka versions (.DLT vs -dlt),
+        // and the DLT name is part of the operational contract, so it should not depend on a library default.
+        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(kafkaTemplate,
+                (record, exception) -> new TopicPartition(topics.donationsDeadLetter(), record.partition()));
+
+        DefaultErrorHandler handler = new DefaultErrorHandler(recoverer, backOff);
         handler.addNotRetryableExceptions(InvalidEventException.class);
         return handler;
     }

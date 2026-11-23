@@ -6,6 +6,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.core.ConsumerFactory;
+import org.springframework.kafka.support.KafkaHeaders;
 
 import java.time.Duration;
 import java.util.List;
@@ -85,7 +86,7 @@ class DonationEventFlowIntegrationTest extends IntegrationTest {
             await().atMost(TIMEOUT).until(() -> {
                 for (ConsumerRecord<?, ?> record : consumer.poll(Duration.ofMillis(500))) {
                     if (key.equals(record.key())) {
-                        assertThat(record.headers().lastHeader("kafka_dlt-exception-fqcn")).isNotNull();
+                        assertThat(record.headers().lastHeader(KafkaHeaders.DLT_EXCEPTION_FQCN)).isNotNull();
                         return true;
                     }
                 }
