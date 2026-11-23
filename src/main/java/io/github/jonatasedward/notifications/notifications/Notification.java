@@ -5,14 +5,18 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
+import jakarta.persistence.PostLoad;
+import jakarta.persistence.PostPersist;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
+import org.springframework.data.domain.Persistable;
 
 import java.time.Instant;
 import java.util.UUID;
 
 @Entity
 @Table(name = "notifications")
-public class Notification {
+public class Notification implements Persistable<UUID> {
 
     @Id
     private UUID id;
@@ -42,10 +46,19 @@ public class Notification {
     @Column(name = "read_at")
     private Instant readAt;
 
+    /**
+     * The id is assigned here, not by the database, so Spring Data cannot tell a new notification from
+     * an existing one and would merge it (one SELECT before every INSERT). Tracing the load test showed
+     * exactly that; this flag makes save() go straight to persist.
+     */
+    @Transient
+    private boolean isNew;
+
     protected Notification() {
     }
 
     Notification(NewNotification data, Instant createdAt) {
+        this.isNew = true;
         this.id = UUID.randomUUID();
         this.recipientId = data.recipientId();
         this.type = data.type();
@@ -54,6 +67,17 @@ public class Notification {
         this.referenceId = data.referenceId();
         this.eventId = data.eventId();
         this.createdAt = createdAt;
+    }
+
+    @PostPersist
+    @PostLoad
+    void markNotNew() {
+        this.isNew = false;
+    }
+
+    @Override
+    public boolean isNew() {
+        return isNew;
     }
 
     void markRead(Instant now) {
