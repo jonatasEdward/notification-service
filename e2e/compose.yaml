@@ -1,0 +1,107 @@
+# Full system for the end-to-end and load tests: Mão Amiga API (producer), this service (consumer),
+# Kafka, one PostgreSQL per service, and Grafana LGTM (OpenTelemetry collector + Tempo + Grafana).
+# Both services run with the OpenTelemetry Java agent, so a single trace covers
+# HTTP request -> outbox -> Kafka -> consumer -> database.
+
+x-otel: &otel
+  JAVA_TOOL_OPTIONS: -javaagent:/app/opentelemetry-javaagent.jar
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://lgtm:4318
+  OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+  OTEL_METRICS_EXPORTER: none
+  OTEL_LOGS_EXPORTER: none
+
+services:
+  kafka:
+    image: apache/kafka:3.9.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:19092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # Topics are created by the consumer with the right partition count, never by accident.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:19092 > /dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+
+  mao-amiga-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: maoamiga
+      POSTGRES_USER: maoamiga
+      POSTGRES_PASSWORD: maoamiga
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U maoamiga -d maoamiga"]
+      interval: 3s
+      retries: 20
+
+  notifications-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: notifications
+      POSTGRES_USER: notifications
+      POSTGRES_PASSWORD: notifications
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notifications -d notifications"]
+      interval: 3s
+      retries: 20
+
+  lgtm:
+    image: grafana/otel-lgtm:0.41.1
+    ports:
+      - "3000:3000"
+      - "3200:3200"
+
+  notification-service:
+    build: ..
+    environment:
+      <<: *otel
+      OTEL_SERVICE_NAME: notification-service
+      DB_HOST: notifications-db
+      DB_PORT: 5432
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      AUTH_JWKS_URI: http://mao-amiga-api:8080/.well-known/jwks.json
+      APP_METRICS_PUBLIC: "true"
+    ports:
+      - "8082:8082"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      notifications-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8082/actuator/health | grep -q UP"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+
+  mao-amiga-api:
+    build: ${MAO_AMIGA_API_DIR:-../../mao-amiga/apps/api}
+    environment:
+      <<: *otel
+      OTEL_SERVICE_NAME: mao-amiga-api
+      SPRING_PROFILES_ACTIVE: dev
+      DB_HOST: mao-amiga-db
+      EVENTS_KAFKA_ENABLED: "true"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+    ports:
+      - "8080:8080"
+    depends_on:
+      mao-amiga-db:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q UP"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
