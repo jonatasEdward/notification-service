@@ -30,19 +30,19 @@ class DonationEventProcessor {
     @Transactional
     Outcome process(DonationEvent event) {
         if (processedEvents.existsById(event.eventId())) {
-            return Outcome.duplicate();
+            return Outcome.alreadyProcessed();
         }
         processedEvents.save(new ProcessedEvent(event.eventId(), event.eventType(), clock.instant()));
-        return Outcome.processed(notificationService.createAll(DonationNotifications.from(event)));
+        return Outcome.stored(notificationService.createAll(DonationNotifications.from(event)));
     }
 
     record Outcome(boolean duplicate, List<Notification> notifications) {
 
-        static Outcome duplicate() {
+        static Outcome alreadyProcessed() {
             return new Outcome(true, List.of());
         }
 
-        static Outcome processed(List<Notification> notifications) {
+        static Outcome stored(List<Notification> notifications) {
             return new Outcome(false, notifications);
         }
     }
