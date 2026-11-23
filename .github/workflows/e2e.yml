@@ -1,0 +1,77 @@
+name: End-to-end and load test
+
+on:
+  workflow_dispatch:
+    inputs:
+      mao_amiga_ref:
+        description: Branch or tag of the Mão Amiga repository (the producer)
+        default: main
+      rate:
+        description: Donations per second during the load test
+        default: "25"
+      duration:
+        description: Load test duration
+        default: 60s
+  schedule:
+    - cron: "0 6 * * 1"
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: notification-service
+
+      - uses: actions/checkout@v4
+        with:
+          repository: jonatasEdward/instituto-mao-amiga
+          ref: ${{ inputs.mao_amiga_ref || 'main' }}
+          path: mao-amiga
+
+      - name: Start the whole system
+        working-directory: notification-service/e2e
+        run: docker compose up -d --build --wait --wait-timeout 600
+
+      - name: Smoke test across both services
+        run: bash notification-service/e2e/smoke.sh
+
+      - name: Check the distributed trace in Tempo
+        run: bash notification-service/e2e/trace-check.sh trace.md
+
+      - uses: grafana/setup-k6-action@v1
+        with:
+          k6-version: 2.4.0
+
+      - name: Load test
+        id: load
+        run: |
+          baseline=$(curl -sS http://localhost:8082/actuator/prometheus \
+            | awk '$1 == "notifications_event_latency_seconds_count" { print int($2) }')
+          echo "baseline=${baseline:-0}" >> "$GITHUB_OUTPUT"
+          k6 run notification-service/e2e/load/donations.js
+        env:
+          RATE: ${{ inputs.rate || '25' }}
+          DURATION: ${{ inputs.duration || '60s' }}
+
+      - name: Report
+        if: ${{ !cancelled() && steps.load.outcome != 'skipped' }}
+        run: |
+          bash notification-service/e2e/report.sh k6-summary.json "${{ steps.load.outputs.baseline }}" report.md
+          cat report.md trace.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Service logs
+        if: failure()
+        working-directory: notification-service/e2e
+        run: docker compose logs --no-color --tail=300
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-results
+          path: |
+            report.md
+            trace.md
+            k6-summary.json
+          if-no-files-found: ignore
