@@ -115,6 +115,50 @@ mvn verify
 
 Integration tests start real Kafka and PostgreSQL containers with Testcontainers. They cover the full path from a message on the topic to the REST API, including redelivery of the same event, unknown event types, and a malformed message ending up on the dead-letter topic with the exception recorded in its headers.
 
+## End-to-end test, tracing and load
+
+The [`End-to-end and load test`](.github/workflows/e2e.yml) workflow builds both services and runs the whole system on a GitHub Actions runner: Mão Amiga API, this service, Kafka, two PostgreSQL instances and Grafana LGTM (OpenTelemetry collector, Tempo, Grafana). Both services run with the OpenTelemetry Java agent. The workflow then:
+
+1. **Smoke test** ([`e2e/smoke.sh`](e2e/smoke.sh)): registers a donation in the Mão Amiga API and waits for the responsible person to be notified here, then confirms it and waits for the donor's notification. This only passes if the outbox, Kafka, the idempotent consumer and RS256 token validation through JWKS all work together.
+2. **Trace check** ([`e2e/trace-check.sh`](e2e/trace-check.sh)): asks Tempo for a trace that starts in the Mão Amiga API and reaches this service, and fails if there is none.
+3. **Load test** ([`e2e/load/donations.js`](e2e/load/donations.js)): k6 registers donations at 25 per second for 60 seconds, then [`e2e/report.sh`](e2e/report.sh) waits until every one became a notification and reads the consumer's latency metric.
+
+Anyone can rerun it from the Actions tab and get the same report in the job summary.
+
+### One trace from the HTTP request to the notification
+
+The producer writes the event to an outbox table and a scheduled job publishes it later, on another thread. Without help, the trace would end at the outbox. The producer stores the W3C `traceparent` next to the event and restores it when publishing, so a single trace covers the whole path (excerpt of a real trace from the workflow):
+
+| Service | Span |
+| --- | --- |
+| mao-amiga-api | `POST /api/v1/doacoes` |
+| mao-amiga-api | `INSERT maoamiga.doacoes` |
+| mao-amiga-api | `INSERT maoamiga.outbox_eventos` |
+| mao-amiga-api | `maoamiga.donations.v1 publish` |
+| notification-service | `maoamiga.donations.v1 process` |
+| notification-service | `SELECT notifications.processed_events` |
+| notification-service | `INSERT notifications.processed_events` |
+| notification-service | `INSERT notifications.notifications` |
+| notification-service | `SELECT notifications.devices` |
+
+### What the first trace caught
+
+The first run showed `Session.merge` and a `SELECT notifications.notifications` before every notification `INSERT`. Notifications get their UUID in the constructor, so Spring Data could not tell they were new and merged them, paying one extra query per notification. Implementing `Persistable` fixed it (same for devices), and the next trace shows a plain `persist` followed by the `INSERT`. No test failed because of this; only the trace made it visible.
+
+### Results
+
+Runner with 2 vCPU and 7 GB RAM, every service and dependency in Docker on the same machine ([run](https://github.com/jonatasEdward/notification-service/actions/runs/45293609900)):
+
+| Metric | Value |
+| --- | --- |
+| Donations registered | 1,501 in 60 s (24 req/s), 0% failed |
+| HTTP latency of the producer, p50 / p95 / p99 | 10 / 66 / 95 ms |
+| Notifications stored | 1,501 of 1,501 |
+| Event created to notification stored, p50 / p95 / p99 | 519 / 1,006 / 1,039 ms |
+| Backlog left when the load stopped | drained in under 1 s |
+
+How to read the end-to-end numbers: almost all of it is the outbox publisher's polling interval (1 s), since an event waits half a second on average before it is published. Consumption itself keeps up with the load, which is why nothing was left to drain. Shortening the interval would cut the latency at the cost of more queries against the producer's database; for donation notifications, one second is fine. The single slowest event (about 3 s) happened while the JVMs were still warming up on a two-core machine.
+
 ## Decisions
 
 - [ADR 1: Kafka as the event backbone](docs/adr/0001-kafka-as-the-event-backbone.md)
@@ -124,10 +168,11 @@ Integration tests start real Kafka and PostgreSQL containers with Testcontainers
 
 ## Roadmap
 
-- [ ] Producer side in Mão Amiga: transactional outbox and RS256 tokens with a JWKS endpoint
-- [ ] Notification inbox in the Mão Amiga app and push token registration
-- [ ] Distributed tracing with OpenTelemetry across producer, Kafka and consumer
-- [ ] Load test with k6, with throughput and latency published here
+- [x] Producer side in Mão Amiga: transactional outbox and RS256 tokens with a JWKS endpoint
+- [x] Notification inbox in the Mão Amiga app and push token registration
+- [x] Distributed tracing with OpenTelemetry across producer, Kafka and consumer
+- [x] End-to-end and load test with k6, results published above
+- [ ] Deploy (Kafka on Aiven, service on Render) and push tested on a real phone
 - [ ] Retention job for `processed_events`
 
 ## License
