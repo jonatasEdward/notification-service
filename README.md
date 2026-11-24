@@ -7,6 +7,8 @@ Event-driven service that turns domain events into user notifications. It consum
 
 Its first producer is [Mão Amiga](https://github.com/jonatasEdward/instituto-mao-amiga), an app that connects donors to donation drop-off points. When a donation is registered, the person who runs the point is told. When the point confirms it arrived, the donor is told.
 
+**See it live:** open the [Mão Amiga demo](https://jonatasedward.github.io/instituto-mao-amiga/), register a donation as `doador@maoamiga.dev`, then log in as `responsavel@maoamiga.dev` (password `maoamiga123` for both) and open the **Avisos** tab. The notification travels through the producer's outbox, Kafka on Aiven and this service on Render. Free instances sleep when idle, so the first request after a while can take a minute; events wait in Kafka meanwhile and are not lost.
+
 ## How it works
 
 ```mermaid
@@ -172,7 +174,8 @@ How to read the end-to-end numbers: almost all of it is the outbox publisher's p
 - [x] Notification inbox in the Mão Amiga app and push token registration
 - [x] Distributed tracing with OpenTelemetry across producer, Kafka and consumer
 - [x] End-to-end and load test with k6, results published above
-- [ ] Deploy (Kafka on Aiven, service on Render) and push tested on a real phone
+- [x] Deploy: Kafka on Aiven (TLS client certificate, `kafka-aiven` profile) and this service on Render ([`render.yaml`](render.yaml))
+- [ ] Push tested on a real phone (needs an EAS project for Expo push tokens)
 - [ ] Retention job for `processed_events`
 
 ## License
