@@ -2,6 +2,7 @@ package io.github.jonatasedward.notifications.events;
 
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.common.TopicPartition;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.TopicBuilder;
@@ -14,13 +15,20 @@ import org.springframework.kafka.support.ExponentialBackOffWithMaxRetries;
 @Configuration
 class KafkaConfig {
 
+    /**
+     * Locally and in tests the service creates its topics. Managed clusters often forbid that (Aiven's
+     * free plan rejects it by policy), so production sets app.topics.create=false and topics are created
+     * in the provider's console instead.
+     */
     @Bean
+    @ConditionalOnProperty(name = "app.topics.create", havingValue = "true", matchIfMissing = true)
     NewTopic donationsTopic(TopicProperties topics) {
         return TopicBuilder.name(topics.donations()).partitions(topics.partitions()).build();
     }
 
     /** Same partition count as the source topic: the recoverer keeps the original partition number. */
     @Bean
+    @ConditionalOnProperty(name = "app.topics.create", havingValue = "true", matchIfMissing = true)
     NewTopic donationsDeadLetterTopic(TopicProperties topics) {
         return TopicBuilder.name(topics.donationsDeadLetter()).partitions(topics.partitions()).build();
     }

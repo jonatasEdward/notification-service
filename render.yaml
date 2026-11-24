@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: notification-service
+    runtime: docker
+    plan: free
+    region: virginia
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /actuator/health
+    autoDeploy: true
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: kafka-aiven
+      - key: JAVA_TOOL_OPTIONS
+        value: -XX:MaxRAMPercentage=60 -XX:+UseSerialGC -Xss512k -XX:TieredStopAtLevel=1
+      - key: AUTH_JWKS_URI
+        value: https://mao-amiga-api-qqvy.onrender.com/.well-known/jwks.json
+      - key: AUTH_ISSUER
+        value: mao-amiga-api
+      - key: CORS_ORIGINS
+        value: https://jonatasedward.github.io
+      - key: APP_TOPICS_CREATE
+        value: "false"
+      - key: PUSH_EXPO_ENABLED
+        value: "true"
+      - key: SPRING_DATASOURCE_URL
+        sync: false
+      - key: SPRING_DATASOURCE_USERNAME
+        sync: false
+      - key: SPRING_DATASOURCE_PASSWORD
+        sync: false
+      - key: KAFKA_BOOTSTRAP_SERVERS
+        sync: false
+      - key: KAFKA_CA_CERT
+        sync: false
+      - key: KAFKA_ACCESS_CERT
+        sync: false
+      - key: KAFKA_ACCESS_KEY
+        sync: false

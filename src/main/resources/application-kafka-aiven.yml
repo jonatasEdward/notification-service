@@ -1,0 +1,12 @@
+# Aiven for Apache Kafka: TLS with a client certificate (the default authentication on Aiven).
+# The three values are the PEM contents of ca.pem, service.cert and service.key from the Aiven console.
+spring:
+  kafka:
+    security:
+      protocol: SSL
+    ssl:
+      trust-store-type: PEM
+      trust-store-certificates: ${KAFKA_CA_CERT}
+      key-store-type: PEM
+      key-store-certificate-chain: ${KAFKA_ACCESS_CERT}
+      key-store-key: ${KAFKA_ACCESS_KEY}
